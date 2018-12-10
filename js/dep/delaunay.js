@@ -1,3 +1,7 @@
+//obtained from https://github.com/ironwallaby/delaunay
+//no copyright
+//edited slightly for my purposes
+
 var Delaunay;
 
 (function() {
