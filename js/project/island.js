@@ -1,4 +1,29 @@
 'use strict';
+
+function uniq(a) {
+  var seen = {};
+  return a.filter(function(item) {
+    return seen.hasOwnProperty(item) ? false : (seen[item] = true);
+  });
+}
+  
+function NearMe(ID, list){
+  var neighbors = [];
+  for(var i=0; i<list.length/3; i++){
+    if(list[i*3]==ID){
+      neighbors.push(list[i*3+1]);
+      neighbors.push(list[i*3+2]);
+    }else if(list[i*3+1]==ID){
+      neighbors.push(list[i*3]);
+      neighbors.push(list[i*3+2]);
+    }else if(list[i*3+2]==ID){
+      neighbors.push(list[i*3+1]);
+      neighbors.push(list[i*3]);
+    }
+  }
+  return uniq(neighbors);
+}
+
 function prepVectors(raw){
   var product = [];
   var vector;
@@ -9,9 +34,9 @@ function prepVectors(raw){
 }
 
 //use a frontier search to grow a random point field with decaying height
-function seedIsland(noise){
+function seedIsland(){
 
-  var frontier = [new THREE.Vector3(0,10,0)];
+  var frontier = [new THREE.Vector3(0,0,0)];
   var seeds = [frontier[0]];
 
   var min_range = 15;
@@ -48,7 +73,6 @@ function seedIsland(noise){
       }
 
       if(valid){
-        idea.y = .5 + noise(idea) - (Math.pow(distance,.5)/300);
         frontier.push(idea);
         seeds.push(idea)
         break;
@@ -62,7 +86,44 @@ function seedIsland(noise){
   return seeds
 }
 
-class triangle_data{
+function raiseIsland(seeds){
+  seeds[0].y = 70 + 7 * (Math.random() - .5);
+
+  var frontier = seeds[0].connections.slice(0)
+  var max, min, bias = .70, i;
+
+  for(i = 1; i < seeds.length; i++){
+    seeds[i].y = -1;
+  }
+
+  while(frontier.length > 0){
+    console.log('cycling');
+    var index = Math.floor(Math.random() * frontier.length);
+    var choice = frontier[index]; 
+    frontier.splice(index, 1);
+
+    max = -1;
+    min = 1000;
+
+    var connections = seeds[choice].connections
+
+    for(i = 0; i < connections.length; i++){
+      if(seeds[connections[i]].y>max){
+        max=seeds[connections[i]].y;
+      }
+      if(seeds[connections[i]].y<min&&seeds[connections[i]].y>=0){
+        min=seeds[connections[i]].y;
+      }
+      if(seeds[connections[i]].y < 0){
+        frontier.push(connections[i])
+      }
+    }
+
+    seeds[choice].y = max * bias + (max/10) * (Math.random() - .5);
+  }
+}
+
+class Triangle{
   constructor(a,b,c) {
     this.a = a;
     this.by = b.y;
@@ -91,18 +152,29 @@ class triangle_data{
   }
 }
 
-class descriptor{
+class Island{
   constructor(triangles, seeds){
-    this.seeds = seeds;
+    var seeds, triangles, i
+
+    seeds = seedIsland();
+    triangles = triangles = Delaunay.triangulate(prepVectors(seeds));
+
+    for(i = 0; i < seeds.length; i++){
+      seeds[i].connections = NearMe(i,triangles);
+    }
+
+    raiseIsland(seeds);
+
     this.precomputed = [];
 
-    for(var jj=0; jj<triangles.length/3; jj++){
-      this.precomputed.push( new triangle_data(
-        seeds[triangles[3*jj+0]],
-        seeds[triangles[3*jj+1]],
-        seeds[triangles[3*jj+2]]))
+    for(i = 0; i < triangles.length/3; i++){
+      this.precomputed.push( new Triangle(
+        seeds[triangles[3*i+0]],
+        seeds[triangles[3*i+1]],
+        seeds[triangles[3*i+2]]))
     }
   }
+  
   height(test){
     var u, v, w, dot02, dot12;
     for(var jj = 0; jj < this.precomputed.length; jj++){
@@ -160,79 +232,9 @@ function EVERYTHING(noise_function){
   var noise_gen = (vector) => {return noise_function(vector.x/40,vector.y/40,vector.z/40)}
 
   //Geography Points
-  var island_seeds = seedIsland(noise_gen);
-  console.log(island_seeds.length, " seeds created");
-  //Find all connections
-  var triangles;
+  var land = new Island()
 
-  triangles = Delaunay.triangulate(prepVectors(island_seeds));
-
-  for(i=0; i<island_seeds.length; i++){
-    island_seeds[i].connections = NearMe(i,triangles);
-  }
-  console.log("delaunay complete");
-
-  //var era = -.1
-  var bias = 0;
-  //var chance_zero = .5;
-  //var chance_one = .45;
-  //var chance_two = .04;
-  var i, j;
-
-  for(i=0;i<island_seeds.length;i++){
-      island_seeds[i].y = -1;
-  }
-
-  island_seeds[0].y = 70 + 7 * noise_gen(island_seeds[0]);
-
-  var frontier = island_seeds[0].connections.slice(0)
-  var max, min, bias = .70;
-
-  while(frontier.length > 0){
-    console.log('cycling');
-    var index = Math.floor(Math.random() * frontier.length);
-    var choice = frontier[index]; 
-    frontier.splice(index, 1);
-
-    max = -1;
-    min = 1000;
-
-    var connections = island_seeds[choice].connections
-
-    for(j=0;j<connections.length;j++){
-      if(island_seeds[connections[j]].y>max){
-        max=island_seeds[connections[j]].y;
-      }
-      if(island_seeds[connections[j]].y<min&&island_seeds[connections[j]].y>=0){
-        min=island_seeds[connections[j]].y;
-      }
-      if(island_seeds[connections[j]].y < 0){
-        frontier.push(connections[j])
-      }
-    }
-
-    island_seeds[choice].y = max * bias + (max/10) * noise_gen(island_seeds[choice]);
-
-    //bias = bias * .95;
-    //var skew = Math.random();
-    /*if(skew>(1-chance_zero)){
-      island_seeds[choice].y = max-(max-min)*(1-bias)+0;
-    }else if(skew>(1-chance_zero-chance_one)){
-      island_seeds[choice].y = max-(max-min)*(1-bias)+1;
-    }
-    else if(skew>(1-chance_zero-chance_one-chance_two)){
-      island_seeds[choice].y = max-(max-min)*(1-bias)+2;
-    }else{
-      island_seeds[choice].y = max-(max-min)*(1-bias)+3;
-    }*/
-  }
-
-  //Terrain
-  var des = new descriptor(triangles, island_seeds)
-
-  var terrain_geometry = GenTerrain(noise_gen, des)
-
-
+  var terrain_geometry = GenTerrain(noise_gen, land)
 
   //Coloring
   terrain_geometry.updateMaterial();
